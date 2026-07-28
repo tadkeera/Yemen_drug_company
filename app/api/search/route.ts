@@ -40,9 +40,9 @@ export async function GET(request: Request) {
     if (type === 'drug') {
       const rows = await db.all(
         `SELECT * FROM drugs 
-         WHERE brand_name LIKE ? 
+         WHERE brand_name LIKE ? OR trade_name LIKE ? 
          LIMIT 50`,
-        [`%${query}%`]
+        [`%${query}%`, `%${query}%`]
       );
 
       const data = rows.map((r: any) => {

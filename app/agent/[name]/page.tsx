@@ -7,12 +7,15 @@ import { useParams } from "next/navigation";
 interface Drug {
   id: number;
   company_name: string;
-  brand_name: string;
+  brand_name: string | null;
+  trade_name: string | null;
   price: number;
   discount_percentage: string;
   public_price: number;
   agent_price: number;
   agent_price_before_discount: number;
+  manufacturer: string | null;
+  country_of_origin: string | null;
   [key: string]: any; // To allow dynamic custom columns
 }
 
@@ -24,6 +27,10 @@ export default function AgentPage() {
   const [dynamicColumns, setDynamicColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Filter state (manufacturer dropdown)
+  const [selectedManufacturer, setSelectedManufacturer] = useState("");
+  const [uniqueManufacturers, setUniqueManufacturers] = useState<string[]>([]);
 
   // Edit state
   const [editingRowId, setEditingRowId] = useState<number | null>(null);
@@ -39,8 +46,15 @@ export default function AgentPage() {
         const colRes = await fetch("/api/search?type=columns");
         const cols = await colRes.json();
         if (cols.success) {
-          // Columns will exclude brand_name, since it is standard
-          const filtered = cols.data.filter((c: string) => c !== "brand_name" && c !== "discount_percentage");
+          // Columns exclude standard ones
+          const exclude = [
+            "brand_name", 
+            "trade_name", 
+            "discount_percentage", 
+            "manufacturer", 
+            "country_of_origin"
+          ];
+          const filtered = cols.data.filter((c: string) => !exclude.includes(c));
           setDynamicColumns(filtered);
         }
 
@@ -48,7 +62,18 @@ export default function AgentPage() {
         const res = await fetch(`/api/search?type=agent&query=${encodeURIComponent(agentName)}`);
         const drugsData = await res.json();
         if (drugsData.success) {
-          setDrugs(drugsData.data);
+          const loadedDrugs: Drug[] = drugsData.data;
+          setDrugs(loadedDrugs);
+
+          // 3. Extract unique manufacturers dynamically
+          const manufacturers = Array.from(
+            new Set(
+              loadedDrugs
+                .map((d) => d.manufacturer?.trim())
+                .filter(Boolean)
+            )
+          ) as string[];
+          setUniqueManufacturers(manufacturers);
         } else {
           setError(drugsData.error || "فشلت عملية تحميل أصناف الوكيل.");
         }
@@ -60,6 +85,11 @@ export default function AgentPage() {
     }
     loadData();
   }, [agentName]);
+
+  // Filter drugs by selected manufacturer
+  const filteredDrugs = selectedManufacturer
+    ? drugs.filter((d) => d.manufacturer === selectedManufacturer)
+    : drugs;
 
   // Start editing a row
   const startEditing = (drug: Drug) => {
@@ -85,13 +115,15 @@ export default function AgentPage() {
   const saveRow = async (id: number) => {
     setSaveLoading(id);
     try {
-      // Calculate new base price if public price was changed
       let finalPrice = editData.public_price !== undefined ? parseFloat(editData.public_price as any) : undefined;
       
       const updates: any = {};
       if (editData.brand_name !== undefined) updates.brand_name = editData.brand_name;
+      if (editData.trade_name !== undefined) updates.trade_name = editData.trade_name;
       if (finalPrice !== undefined) updates.price = finalPrice;
       if (editData.discount_percentage !== undefined) updates.discount_percentage = editData.discount_percentage;
+      if (editData.manufacturer !== undefined) updates.manufacturer = editData.manufacturer;
+      if (editData.country_of_origin !== undefined) updates.country_of_origin = editData.country_of_origin;
       
       // Add custom dynamic columns updates
       dynamicColumns.forEach((col) => {
@@ -113,7 +145,6 @@ export default function AgentPage() {
           prev.map((d) => {
             if (d.id === id) {
               const updatedDrug = { ...d, ...editData } as Drug;
-              // Recalculate read-only fields
               const pPrice = finalPrice !== undefined ? finalPrice : d.price;
               const aPrice = pPrice / 1.15;
               
@@ -138,9 +169,23 @@ export default function AgentPage() {
             return d;
           })
         );
+
+        // Recalculate unique manufacturers list in case one changed
+        setTimeout(() => {
+          setUniqueManufacturers(
+            Array.from(
+              new Set(
+                drugs
+                  .map((d) => (d.id === id ? editData.manufacturer : d.manufacturer)?.trim())
+                  .filter(Boolean)
+              )
+            ) as string[]
+          );
+        }, 100);
+
         setEditingRowId(null);
         setEditData({});
-        alert("تم حفظ التعديلات ومزامنتها بنجاح مع قاعدة البيانات! " + (res.saved_to_disk ? "" : "(ملاحظة: تعديل مؤقت في الذاكرة على منصة فيرسل السحابية)"));
+        alert("تم حفظ التعديلات ومزامنتها بنجاح مع قاعدة البيانات!");
       } else {
         alert("خطأ: " + res.error);
       }
@@ -153,15 +198,26 @@ export default function AgentPage() {
 
   // EXPORT 1: CSV Export
   const exportToCSV = () => {
-    // Columns headers
-    const headers = ["الاسم التجاري والعبوة", "السعر للجمهور (YER)", "سعر الوكيل (YER)", "السعر قبل التخفيض (YER)", "نسبة التخفيض"];
+    const headers = [
+      "الاسم التجاري (عربي)", 
+      "trade name (إنجليزي)", 
+      "الشركة المصنعة", 
+      "بلد المنشأ", 
+      "السعر للجمهور (YER)", 
+      "سعر الوكيل (YER)", 
+      "السعر قبل التخفيض (YER)", 
+      "نسبة التخفيض"
+    ];
     dynamicColumns.forEach((col) => headers.push(col));
 
     const csvRows = [headers.join(",")];
 
-    drugs.forEach((drug) => {
+    filteredDrugs.forEach((drug) => {
       const row = [
-        `"${drug.brand_name.replace(/"/g, '""')}"`,
+        `"${(drug.brand_name || "").replace(/"/g, '""')}"`,
+        `"${(drug.trade_name || "").replace(/"/g, '""')}"`,
+        `"${(drug.manufacturer || "").replace(/"/g, '""')}"`,
+        `"${(drug.country_of_origin || "").replace(/"/g, '""')}"`,
         drug.public_price.toFixed(1),
         drug.agent_price.toFixed(1),
         drug.agent_price_before_discount.toFixed(1),
@@ -186,14 +242,27 @@ export default function AgentPage() {
 
   // EXPORT 2: HTML Export
   const exportToHTML = () => {
-    const tableHeaders = ["الاسم التجاري والعبوة", "السعر للجمهور (YER)", "سعر الوكيل (YER)", "السعر قبل التخفيض (YER)", "نسبة التخفيض", ...dynamicColumns]
+    const tableHeaders = [
+      "الاسم التجاري (عربي)", 
+      "trade name (إنجليزي)", 
+      "الشركة المصنعة", 
+      "بلد المنشأ", 
+      "السعر للجمهور (YER)", 
+      "سعر الوكيل (YER)", 
+      "السعر قبل التخفيض (YER)", 
+      "نسبة التخفيض", 
+      ...dynamicColumns
+    ]
       .map((h) => `<th style="padding:12px; border:1px solid #ddd; background:#1e293b; color:#fff; text-align:right;">${h}</th>`)
       .join("");
 
-    const tableRows = drugs
+    const tableRows = filteredDrugs
       .map((drug) => {
         const standardCols = `
-          <td style="padding:12px; border:1px solid #ddd; font-weight:bold;">${drug.brand_name}</td>
+          <td style="padding:12px; border:1px solid #ddd; font-weight:bold;">${drug.brand_name || "-"}</td>
+          <td style="padding:12px; border:1px solid #ddd; font-family:sans-serif;">${drug.trade_name || "-"}</td>
+          <td style="padding:12px; border:1px solid #ddd;">${drug.manufacturer || "-"}</td>
+          <td style="padding:12px; border:1px solid #ddd;">${drug.country_of_origin || "-"}</td>
           <td style="padding:12px; border:1px solid #ddd; color:#10b981; font-weight:bold;">${drug.public_price.toLocaleString()} YER</td>
           <td style="padding:12px; border:1px solid #ddd;">${drug.agent_price.toFixed(1)} YER</td>
           <td style="padding:12px; border:1px solid #ddd; text-decoration:line-through; color:#94a3b8;">${drug.agent_price_before_discount.toFixed(1)} YER</td>
@@ -223,7 +292,7 @@ export default function AgentPage() {
       </head>
       <body>
         <h1>${agentName}</h1>
-        <p>قائمة أسعار الأدوية المعتمدة - إجمالي الأصناف: ${drugs.length}</p>
+        <p>قائمة أسعار الأدوية المعتمدة - إجمالي الأصناف: ${filteredDrugs.length}</p>
         <table>
           <thead><tr>${tableHeaders}</tr></thead>
           <tbody>${tableRows}</tbody>
@@ -240,11 +309,6 @@ export default function AgentPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  // EXPORT 3: PDF Export (window.print with styling)
-  const exportToPDF = () => {
-    window.print();
   };
 
   return (
@@ -275,25 +339,48 @@ export default function AgentPage() {
         
         {/* Title & Stats Card */}
         <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:border-0 print:shadow-none">
-          <div>
+          <div className="flex-1">
             <span className="text-xs font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-full inline-block mb-3 print:hidden">
               جدول تسعيرة أدوية المنشأة المعتمدة
             </span>
-            <h2 className="text-xl md:text-3xl font-black text-sky-950 font-sans tracking-tight leading-normal">
+            <h2 className="text-xl md:text-3xl font-black text-sky-950 font-sans tracking-tight leading-normal mb-4 md:mb-0">
               {agentName}
             </h2>
           </div>
+          
+          {/* Filters & Actions Column */}
           <div className="flex flex-col items-center md:items-end gap-3 w-full md:w-auto">
-            <div className="bg-slate-50 border border-slate-100 px-6 py-3 rounded-xl text-center min-w-[150px]">
-              <span className="text-xs text-slate-500 block mb-0.5">إجمالي الأصناف</span>
-              <span className="text-xl font-black text-teal-700">{drugs.length} دواء مسجل</span>
+            
+            <div className="flex flex-col sm:flex-row gap-3 w-full justify-center md:justify-end">
+              {/* Manufacturer Filter Dropdown (Optional Feature) */}
+              {uniqueManufacturers.length > 1 && (
+                <div className="relative print:hidden min-w-[200px]">
+                  <select
+                    value={selectedManufacturer}
+                    onChange={(e) => setSelectedManufacturer(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:border-teal-500 text-sky-950"
+                  >
+                    <option value="">تصفية حسب الشركة المصنعة (الكل)</option>
+                    {uniqueManufacturers.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              <div className="bg-slate-50 border border-slate-100 px-6 py-2 rounded-xl text-center min-w-[150px] flex flex-col justify-center">
+                <span className="text-[10px] text-slate-500 block">عدد الأصناف</span>
+                <span className="text-base font-black text-teal-700">{filteredDrugs.length} دواء مصفى</span>
+              </div>
             </div>
             
             {/* Export buttons */}
             {!loading && drugs.length > 0 && (
               <div className="flex gap-2 w-full justify-center md:justify-end print:hidden">
                 <button
-                  onClick={exportToPDF}
+                  onClick={() => window.print()}
                   className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
                 >
                   📄 تصدير PDF
@@ -339,6 +426,8 @@ export default function AgentPage() {
                   <tr className="bg-gradient-to-r from-sky-950 to-teal-900 text-white text-xs md:text-sm font-bold uppercase tracking-wider">
                     <th className="py-4 px-6 text-center border-l border-white/10 print:hidden">#</th>
                     <th className="py-4 px-6 border-l border-white/10">الاسم التجاري والعبوة</th>
+                    <th className="py-4 px-6 text-center border-l border-white/10">الشركة المصنعة</th>
+                    <th className="py-4 px-6 text-center border-l border-white/10">بلد المنشأ</th>
                     <th className="py-4 px-6 text-center border-l border-white/10">السعر للجمهور</th>
                     <th className="py-4 px-6 text-center border-l border-white/10">سعر الوكيل</th>
                     <th className="py-4 px-6 text-center border-l border-white/10">سعر الوكيل قبل التخفيض</th>
@@ -353,8 +442,8 @@ export default function AgentPage() {
                     <th className="py-4 px-6 text-center print:hidden">إجراءات</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-sm font-semibold">
-                  {drugs.map((drug, index) => {
+                <tbody className="divide-y divide-slate-100 text-xs md:text-sm font-semibold">
+                  {filteredDrugs.map((drug, index) => {
                     const isEditing = editingRowId === drug.id;
                     return (
                       <tr 
@@ -365,21 +454,68 @@ export default function AgentPage() {
                           {index + 1}
                         </td>
                         
-                        {/* 1. brand_name */}
+                        {/* 1. Brand & Trade Names */}
                         <td className="py-4 px-6 font-bold text-sky-950 border-l border-slate-100 max-w-xs md:max-w-md">
                           {isEditing ? (
-                            <input
-                              type="text"
-                              value={editData.brand_name || ""}
-                              onChange={(e) => handleEditChange("brand_name", e.target.value)}
-                              className="w-full px-3 py-1.5 border border-teal-300 rounded-lg focus:outline-none focus:border-teal-500 bg-white"
-                            />
+                            <div className="flex flex-col gap-2 min-w-[200px]">
+                              <input
+                                type="text"
+                                value={editData.brand_name || ""}
+                                onChange={(e) => handleEditChange("brand_name", e.target.value)}
+                                placeholder="الاسم بالعربي..."
+                                className="w-full px-3 py-1.5 border border-teal-300 rounded-lg text-xs"
+                              />
+                              <input
+                                type="text"
+                                value={editData.trade_name || ""}
+                                onChange={(e) => handleEditChange("trade_name", e.target.value)}
+                                placeholder="Trade Name (EN)..."
+                                className="w-full px-3 py-1.5 border border-teal-300 rounded-lg text-xs"
+                              />
+                            </div>
                           ) : (
-                            drug.brand_name
+                            <div>
+                              <span className="block font-bold text-sky-950 leading-normal">
+                                {drug.brand_name || drug.trade_name || "صنف غير معروف"}
+                              </span>
+                              {drug.brand_name && drug.trade_name && (
+                                <span className="block text-[11px] text-slate-400 font-normal mt-0.5 font-sans">
+                                  {drug.trade_name}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
 
-                        {/* 2. public_price */}
+                        {/* 2. Manufacturer */}
+                        <td className="py-4 px-6 text-center border-l border-slate-100 text-slate-600">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editData.manufacturer || ""}
+                              onChange={(e) => handleEditChange("manufacturer", e.target.value)}
+                              className="w-28 px-3 py-1.5 border border-teal-300 rounded-lg text-xs"
+                            />
+                          ) : (
+                            drug.manufacturer || "-"
+                          )}
+                        </td>
+
+                        {/* 3. Country of Origin */}
+                        <td className="py-4 px-6 text-center border-l border-slate-100 text-slate-500">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editData.country_of_origin || ""}
+                              onChange={(e) => handleEditChange("country_of_origin", e.target.value)}
+                              className="w-24 px-3 py-1.5 border border-teal-300 rounded-lg text-xs text-center"
+                            />
+                          ) : (
+                            drug.country_of_origin ? `🌍 ${drug.country_of_origin}` : "-"
+                          )}
+                        </td>
+
+                        {/* 4. Public Price */}
                         <td className="py-4 px-6 text-center font-extrabold text-emerald-700 border-l border-slate-100 bg-emerald-50/10">
                           {isEditing ? (
                             <input
@@ -393,17 +529,17 @@ export default function AgentPage() {
                           )}
                         </td>
 
-                        {/* 3. agent_price */}
+                        {/* 5. Agent Price */}
                         <td className="py-4 px-6 text-center font-bold text-sky-900 border-l border-slate-100">
                           {drug.agent_price.toLocaleString(undefined, { maximumFractionDigits: 1 })} YER
                         </td>
 
-                        {/* 4. agent_price_before_discount */}
+                        {/* 6. Agent Price Before Discount */}
                         <td className="py-4 px-6 text-center font-semibold text-slate-400 line-through border-l border-slate-100">
                           {drug.agent_price_before_discount.toLocaleString(undefined, { maximumFractionDigits: 1 })} YER
                         </td>
 
-                        {/* 5. discount_percentage */}
+                        {/* 7. Discount Percentage */}
                         <td className="py-4 px-6 text-center border-l border-slate-100">
                           {isEditing ? (
                             <input
@@ -423,7 +559,7 @@ export default function AgentPage() {
                           )}
                         </td>
 
-                        {/* 6. Dynamic columns */}
+                        {/* 8. Dynamic custom columns */}
                         {dynamicColumns.map((col) => (
                           <td key={col} className="py-4 px-6 text-center border-l border-slate-100 text-slate-600">
                             {isEditing ? (
@@ -439,7 +575,7 @@ export default function AgentPage() {
                           </td>
                         ))}
 
-                        {/* 7. Action buttons (Edit/Save/Cancel) */}
+                        {/* 9. Actions */}
                         <td className="py-4 px-6 text-center print:hidden">
                           {isEditing ? (
                             <div className="flex gap-2 justify-center">

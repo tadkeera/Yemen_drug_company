@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation";
 
 interface Drug {
   id: number;
-  brand_name: string;
+  brand_name: string | null;
+  trade_name: string | null;
   company_name: string;
   public_price: number;
   agent_price: number;
   agent_price_before_discount: number;
   discount_percentage: string;
+  manufacturer: string | null;
+  country_of_origin: string | null;
 }
 
 export default function Home() {
@@ -319,9 +322,10 @@ export default function Home() {
                         key={drug.id}
                         type="button"
                         onClick={() => {
-                          setDrugQuery(drug.brand_name);
+                          const nameToSearch = drug.brand_name || drug.trade_name || "";
+                          setDrugQuery(nameToSearch);
                           setShowDrugSuggestions(false);
-                          handleDrugSearch(undefined, drug.brand_name);
+                          handleDrugSearch(undefined, nameToSearch);
                         }}
                         className="w-full text-right px-5 py-3.5 hover:bg-teal-50 transition-colors border-b border-slate-50 last:border-0 text-sm font-bold text-sky-950 flex justify-between items-center"
                       >
@@ -426,13 +430,27 @@ export default function Home() {
                 >
                   {/* Card Header */}
                   <div className="flex justify-between items-start gap-4">
-                    <div>
-                      <span className="inline-block bg-teal-50 text-teal-800 text-xs font-bold px-2.5 py-1 rounded-full mb-2">
-                        {drug.company_name}
-                      </span>
-                      <h4 className="text-lg font-bold text-sky-950 font-sans tracking-tight">
-                        {drug.brand_name}
+                    <div className="flex-1">
+                      <div className="flex flex-wrap gap-2 items-center mb-2">
+                        <span className="bg-teal-50 text-teal-800 text-xs font-bold px-2.5 py-1 rounded-full">
+                          {drug.company_name}
+                        </span>
+                        {drug.country_of_origin && (
+                          <span className="bg-sky-50 text-sky-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-sky-100">
+                            🌍 {drug.country_of_origin}
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="text-lg font-bold text-sky-950 font-sans tracking-tight leading-normal">
+                        {drug.trade_name && drug.brand_name 
+                          ? `${drug.brand_name} / ${drug.trade_name}` 
+                          : (drug.trade_name || drug.brand_name || "صنف غير معروف")}
                       </h4>
+                      {drug.manufacturer && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          🏢 مصنع بواسطة: <span className="font-semibold text-slate-600">{drug.manufacturer}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="bg-emerald-50 text-emerald-800 px-4 py-3 rounded-xl border border-emerald-100 text-center min-w-[110px]">
                       <span className="block text-xs font-semibold text-slate-500 mb-1">السعر للجمهور</span>
