@@ -7,8 +7,10 @@ let dbInstance: any = null;
 export async function getDbConnection() {
   if (dbInstance) return dbInstance;
 
-  // Initialize sql.js (pure JS/WASM engine)
-  const SQL = await initSqlJs();
+  // Initialize sql.js (pure JS/WASM engine) with local WASM path resolution
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(process.cwd(), file)
+  });
 
   // Read the local .db file from the project directory
   const dbPath = path.join(process.cwd(), 'Yemen_drug_company.db');
