@@ -20,16 +20,26 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: agents });
     }
 
+    // 2. Get List of all table column definitions (excluding internal IDs)
+    if (type === 'columns') {
+      const pragma = await db.all("PRAGMA table_info(drugs)");
+      // Exclude internal database columns to only show meaningful ones
+      const exclude = ['id', 'company_id', 'company_name', 'price', 'page_num', 'pdf_file'];
+      const columns = pragma
+        .map((col: any) => col.name)
+        .filter((name: string) => !exclude.includes(name));
+      return NextResponse.json({ success: true, data: columns });
+    }
+
     // Check query param
     if (!query) {
       return NextResponse.json({ success: false, error: 'Query parameter is required' }, { status: 400 });
     }
 
-    // 2. Search by Drug Name
+    // 3. Search by Drug Name
     if (type === 'drug') {
       const rows = await db.all(
-        `SELECT id, company_name, brand_name, price, discount_percentage 
-         FROM drugs 
+        `SELECT * FROM drugs 
          WHERE brand_name LIKE ? 
          LIMIT 50`,
         [`%${query}%`]
@@ -52,10 +62,9 @@ export async function GET(request: Request) {
           ? agentPrice / (1 - discountPct / 100)
           : agentPrice;
 
+        // Keep all other fields dynamic
         return {
-          id: r.id,
-          brand_name: r.brand_name,
-          company_name: r.company_name,
+          ...r,
           public_price: publicPrice,
           agent_price: agentPrice,
           agent_price_before_discount: agentPriceBefore,
@@ -66,14 +75,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data });
     }
 
-    // 3. Search by Agent Name
+    // 4. Search by Agent Name
     if (type === 'agent') {
       const rows = await db.all(
-        `SELECT id, company_name, brand_name, price, discount_percentage 
-         FROM drugs 
+        `SELECT * FROM drugs 
          WHERE company_name LIKE ? 
          ORDER BY brand_name 
-         LIMIT 100`,
+         LIMIT 200`,
         [`%${query}%`]
       );
 
@@ -94,9 +102,7 @@ export async function GET(request: Request) {
           : agentPrice;
 
         return {
-          id: r.id,
-          brand_name: r.brand_name,
-          company_name: r.company_name,
+          ...r,
           public_price: publicPrice,
           agent_price: agentPrice,
           agent_price_before_discount: agentPriceBefore,

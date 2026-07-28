@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 
 interface Drug {
   id: number;
@@ -25,10 +24,20 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Agent list for dropdown/autocomplete
+  // Agent list autocomplete states
   const [allAgents, setAllAgents] = useState<string[]>([]);
   const [filteredAgents, setFilteredAgents] = useState<string[]>([]);
   const [showAgentSuggestions, setShowAgentSuggestions] = useState(false);
+
+  // Drug suggestions states (live search suggestions)
+  const [drugSuggestions, setDrugSuggestions] = useState<Drug[]>([]);
+  const [showDrugSuggestions, setShowDrugSuggestions] = useState(false);
+
+  // Add Custom Column states
+  const [showAddCol, setShowAddCol] = useState(false);
+  const [newColName, setNewColName] = useState("");
+  const [addColLoading, setAddColLoading] = useState(false);
+  const [addColMessage, setAddColMessage] = useState("");
 
   // Fetch unique agents on mount
   useEffect(() => {
@@ -60,15 +69,17 @@ export default function Home() {
     }
   }, [agentQuery, allAgents]);
 
-  // Handle drug search
-  const handleDrugSearch = async (e?: React.FormEvent) => {
+  // Handle drug search results
+  const handleDrugSearch = async (e?: React.FormEvent, explicitQuery?: string) => {
     if (e) e.preventDefault();
-    if (!drugQuery.trim()) return;
+    const queryToSearch = explicitQuery !== undefined ? explicitQuery : drugQuery;
+    if (!queryToSearch.trim()) return;
 
     setLoading(true);
     setError("");
+    setShowDrugSuggestions(false);
     try {
-      const r = await fetch(`/api/search?type=drug&query=${encodeURIComponent(drugQuery)}`);
+      const r = await fetch(`/api/search?type=drug&query=${encodeURIComponent(queryToSearch)}`);
       const res = await r.json();
       if (res.success) {
         setDrugResults(res.data);
@@ -85,16 +96,26 @@ export default function Home() {
     }
   };
 
-  // Live search as user types for drug name (debounce or direct)
+  // Live drug name autocomplete suggestions as user types (starts at 3 chars)
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      if (drugQuery.trim().length >= 2) {
-        handleDrugSearch();
-      } else if (drugQuery.trim().length === 0) {
-        setDrugResults([]);
-        setError("");
+    const delayDebounce = setTimeout(async () => {
+      const q = drugQuery.trim();
+      if (q.length >= 3) {
+        try {
+          const r = await fetch(`/api/search?type=drug&query=${encodeURIComponent(q)}`);
+          const res = await r.json();
+          if (res.success) {
+            setDrugSuggestions(res.data.slice(0, 8)); // Suggest top 8 matches
+            setShowDrugSuggestions(true);
+          }
+        } catch (err) {
+          console.error("Error fetching drug suggestions:", err);
+        }
+      } else {
+        setDrugSuggestions([]);
+        setShowDrugSuggestions(false);
       }
-    }, 400);
+    }, 300);
 
     return () => clearTimeout(delayDebounce);
   }, [drugQuery]);
@@ -104,6 +125,37 @@ export default function Home() {
     e.preventDefault();
     if (!agentQuery.trim()) return;
     router.push(`/agent/${encodeURIComponent(agentQuery.trim())}`);
+  };
+
+  // Action: Add New Column to database
+  const handleAddColumn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newColName.trim()) return;
+
+    setAddColLoading(true);
+    setAddColMessage("");
+    try {
+      const r = await fetch("/api/save?action=add-column", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newColName.trim() })
+      });
+      const res = await r.json();
+      if (res.success) {
+        setAddColMessage(`✅ تم إضافة العمود الجديد "${newColName.trim()}" بنجاح! سيظهر الآن في جميع تداول الأصناف.`);
+        setNewColName("");
+        setTimeout(() => {
+          setShowAddCol(false);
+          setAddColMessage("");
+        }, 5000);
+      } else {
+        setAddColMessage(`❌ خطأ: ${res.error}`);
+      }
+    } catch (err) {
+      setAddColMessage("❌ فشل الاتصال بالخادم لإضافة العمود.");
+    } finally {
+      setAddColLoading(false);
+    }
   };
 
   return (
@@ -120,16 +172,68 @@ export default function Home() {
               <p className="text-xs text-teal-200">المنصة الإلكترونية الرسمية للتحقق من أسعار الأدوية</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/20">
-            <span className="inline-block w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse"></span>
-            <span className="text-xs font-semibold text-emerald-100">قاعدة بيانات معتمدة ونشطة</span>
+          
+          <div className="flex items-center gap-3">
+            {/* Add New Column Trigger Button */}
+            <button
+              onClick={() => setShowAddCol(!showAddCol)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-1 border border-emerald-500 hover:scale-105"
+            >
+              ➕ إضافة حقل جديد لقاعدة البيانات
+            </button>
+            <div className="hidden md:flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl border border-white/20">
+              <span className="inline-block w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse"></span>
+              <span className="text-xs font-semibold text-emerald-100">قاعدة بيانات معتمدة ونشطة</span>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-8 flex flex-col gap-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-8 flex flex-col gap-6">
         
+        {/* Dynamic Add New Column Form (Card Section) */}
+        {showAddCol && (
+          <section className="bg-white border border-emerald-200 rounded-2xl p-6 shadow-md animate-fade-in">
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-lg font-bold text-sky-950 flex items-center gap-2">
+                <span>➕ إضافة حقل (عمود) جديد لقاعدة البيانات</span>
+              </h3>
+              <button 
+                onClick={() => { setShowAddCol(false); setAddColMessage(""); }}
+                className="text-slate-400 hover:text-slate-600 text-sm"
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+            <p className="text-slate-500 text-xs md:text-sm mb-4 leading-relaxed">
+              عند إضافة حقل جديد (مثال: <span className="font-mono bg-slate-100 px-1 rounded text-teal-700">تاريخ الصلاحية</span> أو <span className="font-mono bg-slate-100 px-1 rounded text-teal-700">بلد المنشأ</span>)، سيتم تعديل جدول قاعدة البيانات برمجياً على الفور، ليظهر هذا العمود الجديد كخيار تعديل وحفظ إضافي في كافة تداولات الأصناف للوكلاء!
+            </p>
+            <form onSubmit={handleAddColumn} className="flex flex-col md:flex-row gap-3">
+              <input
+                type="text"
+                value={newColName}
+                onChange={(e) => setNewColName(e.target.value)}
+                placeholder="اكتب اسم الحقل الجديد بالعربية أو الإنجليزية..."
+                className="flex-1 px-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500 bg-white font-bold"
+                required
+              />
+              <button
+                type="submit"
+                disabled={addColLoading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-xl text-sm transition-colors shadow-sm disabled:opacity-50"
+              >
+                {addColLoading ? "جاري الإضافة..." : "💾 حفظ الحقل والمزامنة"}
+              </button>
+            </form>
+            {addColMessage && (
+              <p className="text-sm font-bold text-slate-700 mt-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                {addColMessage}
+              </p>
+            )}
+          </section>
+        )}
+
         {/* Hero Section */}
         <section className="text-center py-6 md:py-10 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-12 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl"></div>
@@ -206,8 +310,30 @@ export default function Home() {
                     <span>بحث</span>
                   </button>
                 </div>
+                
+                {/* Option A Autocomplete Dropdown */}
+                {showDrugSuggestions && drugQuery.trim().length >= 3 && drugSuggestions.length > 0 && (
+                  <div className="absolute z-30 left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl text-right">
+                    {drugSuggestions.map((drug) => (
+                      <button
+                        key={drug.id}
+                        type="button"
+                        onClick={() => {
+                          setDrugQuery(drug.brand_name);
+                          setShowDrugSuggestions(false);
+                          handleDrugSearch(undefined, drug.brand_name);
+                        }}
+                        className="w-full text-right px-5 py-3.5 hover:bg-teal-50 transition-colors border-b border-slate-50 last:border-0 text-sm font-bold text-sky-950 flex justify-between items-center"
+                      >
+                        <span className="text-teal-600 text-xs font-semibold">{drug.company_name}</span>
+                        <span>{drug.brand_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                
                 <p className="text-xs text-slate-400 text-right mt-2 pr-2">
-                  * يبدأ البحث تلقائياً بمجرد كتابة حرفين أو أكثر
+                  * تظهر اقتراحات ذكية تلقائياً فور كتابة 3 أحرف أو أكثر
                 </p>
               </form>
             )}
@@ -224,7 +350,7 @@ export default function Home() {
                       setShowAgentSuggestions(true);
                     }}
                     onFocus={() => setShowAgentSuggestions(true)}
-                    placeholder="اكتب اسم الوكيل أو المنشأة الصيدلانية..."
+                    placeholder="اكتب اسم الوكيل أو المنشأة صيدلانية..."
                     className="flex-1 px-5 py-4 text-base focus:outline-none bg-transparent"
                   />
                   <button
@@ -236,7 +362,7 @@ export default function Home() {
                 </div>
 
                 {/* Autocomplete Dropdown */}
-                {showAgentSuggestions && agentQuery.trim().length > 0 && filteredAgents.length > 0 && (
+                {showAgentSuggestions && agentQuery.trim().length >= 3 && filteredAgents.length > 0 && (
                   <div className="absolute z-30 left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl text-right">
                     {filteredAgents.slice(0, 15).map((agent, i) => (
                       <button
@@ -247,7 +373,7 @@ export default function Home() {
                           setShowAgentSuggestions(false);
                           router.push(`/agent/${encodeURIComponent(agent)}`);
                         }}
-                        className="w-full text-right px-5 py-3 hover:bg-teal-50 transition-colors border-b border-slate-50 last:border-0 text-sm font-semibold text-slate-700 flex justify-between items-center"
+                        className="w-full text-right px-5 py-3.5 hover:bg-teal-50 transition-colors border-b border-slate-50 last:border-0 text-sm font-bold text-slate-700 flex justify-between items-center"
                       >
                         <span className="text-teal-600 text-xs">عرض المنتجات ↚</span>
                         <span>{agent}</span>
@@ -255,6 +381,10 @@ export default function Home() {
                     ))}
                   </div>
                 )}
+                
+                <p className="text-xs text-slate-400 text-right mt-2 pr-2">
+                  * تظهر اقتراحات الوكلاء المعتمدين تلقائياً فور كتابة 3 أحرف أو أكثر
+                </p>
               </form>
             )}
           </div>
@@ -264,7 +394,7 @@ export default function Home() {
         {loading && (
           <div className="flex flex-col items-center justify-center py-12 gap-3">
             <div className="w-12 h-12 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
-            <p className="text-slate-500 font-semibold">جاري البحث عن الأصناف الدوائية...</p>
+            <p className="text-slate-500 font-semibold text-sm">جاري البحث عن الأصناف الدوائية...</p>
           </div>
         )}
 
