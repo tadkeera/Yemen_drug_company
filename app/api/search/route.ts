@@ -16,7 +16,7 @@ export async function GET(request: Request) {
          WHERE company_name IS NOT NULL AND company_name != '' 
          ORDER BY company_name`
       );
-      const agents = rows.map((r) => r.company_name);
+      const agents = rows.map((r: any) => r.company_name);
       return NextResponse.json({ success: true, data: agents });
     }
 
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         [`%${query}%`]
       );
 
-      const data = rows.map((r) => {
+      const data = rows.map((r: any) => {
         const publicPrice = r.price; // The database price is the approved public price
         const agentPrice = publicPrice / 1.15; // Calculated agent price with 15% pharmacy markup
         
@@ -77,7 +77,7 @@ export async function GET(request: Request) {
         [`%${query}%`]
       );
 
-      const data = rows.map((r) => {
+      const data = rows.map((r: any) => {
         const publicPrice = r.price;
         const agentPrice = publicPrice / 1.15;
 
